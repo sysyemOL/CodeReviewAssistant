@@ -22,7 +22,7 @@ export const reviewAPI = {
 
 // SSE流式审查
 export function createReviewStream(data, onMessage, onError, onComplete) {
-  const url = `/api/review/stream`
+  const url = `/api/v1/review/stream`  // 修改为与后端一致的API前缀
   const eventSource = new EventSource(url)
   
   eventSource.onmessage = (event) => {

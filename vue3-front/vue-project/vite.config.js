@@ -17,11 +17,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: '0.0.0.0',
+    host: 'localhost',  // 使用localhost而不是127.0.0.1，避免CORS问题
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8000',  // 保持一致使用localhost
         changeOrigin: true,
+        secure: false,
       }
     }
   },

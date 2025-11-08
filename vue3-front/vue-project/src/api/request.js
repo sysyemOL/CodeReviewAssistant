@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 
 // 创建axios实例
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1',  // 修改为与后端一致的API前缀
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
@@ -25,7 +25,16 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   (response) => {
-    return response.data
+    const { code, data, message } = response.data
+    
+    // 如果返回码不是200，视为错误
+    if (code !== 200) {
+      ElMessage.error(message || '请求失败')
+      return Promise.reject(new Error(message || '请求失败'))
+    }
+    
+    // 返回data字段（实际数据）
+    return data
   },
   (error) => {
     // 错误处理

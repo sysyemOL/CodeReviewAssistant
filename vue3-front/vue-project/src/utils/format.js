@@ -56,7 +56,8 @@ export function getLanguageFromFilename(filename) {
     'php': 'php',
     'rb': 'ruby',
     'swift': 'swift',
-    'kt': 'kotlin'
+    'kt': 'kotlin',
+    'vue': 'html'  // Vue文件使用HTML语法高亮
   }
   return languageMap[ext] || 'plaintext'
 }

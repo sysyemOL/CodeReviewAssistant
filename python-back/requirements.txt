@@ -1,0 +1,35 @@
+# Web Framework
+fastapi==0.121.0
+uvicorn[standard]==0.38.0
+python-multipart==0.0.20
+
+# AI & LangChain
+langchain==1.0.0
+langchain-openai==0.3.33
+openai==1.108.0
+
+# Database
+sqlalchemy==2.0.43
+alembic==1.17.1
+
+# Data Validation
+pydantic==2.12.4
+pydantic-settings==2.11.0
+
+# Code Analysis Tools
+pylint==4.0.2
+flake8==7.3.0
+autopep8==2.3.2
+
+# Utilities
+python-dotenv==1.1.1
+aiofiles==24.1.0
+httpx==0.28.1
+
+# Authentication
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+
+# Testing
+pytest==8.4.2
+pytest-asyncio==1.2.0

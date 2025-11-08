@@ -1,11 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { sessionAPI } from '@/api/session'
+import { setStorage, getStorage } from '@/utils/storage'
 
 export const useSessionStore = defineStore('session', () => {
+  // 从LocalStorage恢复状态
+  const savedSessions = getStorage('sessions', [])
+  const savedCurrentSessionId = getStorage('currentSessionId', null)
+  
   // 状态
-  const sessions = ref([])
-  const currentSessionId = ref(null)
+  const sessions = ref(savedSessions)
+  const currentSessionId = ref(savedCurrentSessionId)
   const isLoading = ref(false)
   
   // 计算属性
@@ -24,7 +29,8 @@ export const useSessionStore = defineStore('session', () => {
     try {
       isLoading.value = true
       const data = await sessionAPI.getSessions()
-      sessions.value = data
+      // 后端返回的是 {total, items} 格式，需要提取items
+      sessions.value = data.items || []
     } catch (error) {
       console.error('获取会话列表失败:', error)
       throw error
@@ -78,6 +84,15 @@ export const useSessionStore = defineStore('session', () => {
   const setCurrentSession = (sessionId) => {
     currentSessionId.value = sessionId
   }
+  
+  // 监听状态变化，自动保存到LocalStorage
+  watch(sessions, (newSessions) => {
+    setStorage('sessions', newSessions)
+  }, { deep: true })
+  
+  watch(currentSessionId, (newId) => {
+    setStorage('currentSessionId', newId)
+  })
   
   return {
     sessions,

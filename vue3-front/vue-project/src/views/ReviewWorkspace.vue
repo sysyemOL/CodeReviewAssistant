@@ -3,24 +3,39 @@
     <!-- 左侧：历史会话列表 -->
     <aside class="sidebar" :class="{ collapsed: appStore.sidebarCollapsed }">
       <div class="sidebar-header">
-        <h3 v-if="!appStore.sidebarCollapsed">历史对话</h3>
-        <el-button 
-          :icon="Plus" 
-          type="primary" 
-          @click="handleCreateSession"
-          :title="appStore.sidebarCollapsed ? '新对话' : ''"
-        >
-          <span v-if="!appStore.sidebarCollapsed">新对话</span>
-        </el-button>
-      </div>
-      
-      <SessionList v-if="!appStore.sidebarCollapsed" />
-      
-      <div class="sidebar-footer">
+        <div class="header-left">
+          <h3 v-if="!appStore.sidebarCollapsed">历史对话</h3>
+          <el-button 
+            :icon="Plus" 
+            type="primary" 
+            @click="handleCreateSession"
+            :title="appStore.sidebarCollapsed ? '新对话' : ''"
+            v-if="!appStore.sidebarCollapsed"
+          >
+            <span>新对话</span>
+          </el-button>
+        </div>
+        
+        <!-- 收缩/展开按钮移到顶部 -->
         <el-button 
           :icon="appStore.sidebarCollapsed ? Expand : Fold" 
           circle
           @click="appStore.toggleSidebar"
+          class="toggle-btn"
+          :title="appStore.sidebarCollapsed ? '展开侧边栏' : '收缩侧边栏'"
+        />
+      </div>
+      
+      <SessionList v-if="!appStore.sidebarCollapsed" />
+      
+      <!-- 收缩后只显示新对话按钮 -->
+      <div class="collapsed-actions" v-if="appStore.sidebarCollapsed">
+        <el-button 
+          :icon="Plus" 
+          circle
+          type="primary"
+          @click="handleCreateSession"
+          title="新对话"
         />
       </div>
     </aside>
@@ -40,8 +55,22 @@
       </div>
     </main>
 
+    <!-- 拖拽手柄 -->
+    <div 
+      v-if="fileStore.currentFile"
+      class="resize-handle"
+      @mousedown="startResize"
+      :class="{ resizing: isResizing }"
+    >
+      <div class="resize-handle-line"></div>
+    </div>
+
     <!-- 右侧：代码编辑器 -->
-    <aside class="code-panel" :class="{ hidden: !fileStore.currentFile }">
+    <aside 
+      class="code-panel" 
+      :class="{ hidden: !fileStore.currentFile }" 
+      :style="!fileStore.currentFile ? { display: 'none' } : (codePanelWidth ? { width: codePanelWidth + 'px', flex: 'none' } : {})"
+    >
       <div class="code-header">
         <div class="file-tabs">
           <div 
@@ -57,18 +86,64 @@
             </el-icon>
           </div>
         </div>
+        <div class="code-actions">
+          <!-- 透明度滑轨（仅毛玻璃主题显示） -->
+          <div v-if="isGlassTheme" class="opacity-control">
+            <span class="opacity-label">透明度</span>
+            <el-slider 
+              v-model="glassOpacity" 
+              :min="30" 
+              :max="90" 
+              :show-tooltip="true"
+              :format-tooltip="(val) => `${val}%`"
+              style="width: 120px;"
+            />
+          </div>
+          
+          <ThemeSelector v-model="editorTheme" />
+          
+          <!-- 背景管理按钮 -->
+          <el-dropdown trigger="click" @command="handleBackgroundCommand">
+            <el-button :icon="Picture" circle :title="backgroundImage ? '背景管理' : '上传背景图片'" />
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="upload">
+                  <el-icon><Upload /></el-icon>
+                  上传背景
+                </el-dropdown-item>
+                <el-dropdown-item v-if="backgroundImage" command="clear" divided>
+                  <el-icon><Delete /></el-icon>
+                  清除背景
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </div>
       
-      <div class="code-editor">
-        <CodeEditor 
-          v-if="fileStore.currentFile"
-          :file-id="fileStore.currentFileId"
-          :language="getFileLanguage(fileStore.currentFile.filename)"
-          :content="fileStore.currentFileContent"
-          @update="handleCodeUpdate"
+      <div class="code-editor-wrapper">
+        <FileTree 
+          :files="fileStore.uploadedFiles"
+          :current-file-id="fileStore.currentFileId"
+          @select-file="fileStore.setCurrentFile"
+          @toggle-collapse="handleFileTreeToggle"
         />
-        <div v-else class="empty-state">
-          <el-empty description="暂无文件" />
+        <div 
+          class="code-editor" 
+          :class="{ 'glass-theme': isGlassTheme }"
+          :style="getEditorStyle()"
+        >
+          <CodeEditor 
+            v-if="fileStore.currentFile"
+            :file-id="fileStore.currentFileId"
+            :language="getFileLanguage(fileStore.currentFile.filename)"
+            :content="fileStore.currentFileContent"
+            :theme="editorTheme"
+            @update="handleCodeUpdate"
+          />
+          <div v-else class="empty-state">
+            <el-empty description="暂无文件" />
+          </div>
         </div>
       </div>
     </aside>
@@ -76,8 +151,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { Plus, Expand, Fold, Close } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { Plus, Expand, Fold, Close, Upload, Picture, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
@@ -87,7 +162,10 @@ import SessionList from '@/components/sidebar/SessionList.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import InputBox from '@/components/chat/InputBox.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
+import ThemeSelector from '@/components/common/ThemeSelector.vue'
+import FileTree from '@/components/common/FileTree.vue'
 import { getLanguageFromFilename } from '@/utils/format'
+import { readFileContent, generateFileId } from '@/utils/file'
 
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
@@ -96,12 +174,49 @@ const fileStore = useFileStore()
 
 const messagesContainer = ref(null)
 
+// 拖拽调整宽度相关
+const codePanelWidth = ref(null)  // 初始为null，使用弹性布局
+const isResizing = ref(false)
+const startX = ref(0)
+const startCodeWidth = ref(0)
+
+// 编辑器主题和背景
+const editorTheme = ref('pure-white')
+const backgroundImage = ref(null)
+const glassOpacity = ref(70)  // 毛玻璃透明度，30-90
+
+// 判断是否为毛玻璃主题
+const isGlassTheme = computed(() => {
+  return editorTheme.value === 'white-glass' || editorTheme.value === 'dark-glass'
+})
+
 const currentSessionTitle = computed(() => {
   return sessionStore.currentSession?.title || 'AI代码Review助手'
 })
 
 const getFileLanguage = (filename) => {
   return getLanguageFromFilename(filename)
+}
+
+// 获取编辑器样式（背景图片 + 毛玻璃透明度）
+const getEditorStyle = () => {
+  const styles = {}
+  
+  // 应用背景图片
+  if (backgroundImage.value) {
+    styles.backgroundImage = `url(${backgroundImage.value})`
+    styles.backgroundSize = 'cover'
+    styles.backgroundPosition = 'center'
+  }
+  
+  // 应用毛玻璃透明度（通过 CSS 变量）
+  if (isGlassTheme.value) {
+    // 将透明度百分比转换为 0-1 的值
+    const opacityValue = glassOpacity.value / 100
+    styles['--glass-opacity'] = opacityValue
+  }
+  
+  return styles
 }
 
 const handleCreateSession = async () => {
@@ -119,13 +234,45 @@ const handleSendMessage = async (content, files) => {
     await handleCreateSession()
   }
   
-  // 添加用户消息
-  messageStore.addUserMessage(sessionStore.currentSessionId, content)
-  
   // 处理文件上传
   if (files && files.length > 0) {
-    // TODO: 实现文件上传逻辑
-    console.log('上传文件:', files)
+    fileStore.isUploading = true
+    try {
+      for (const file of files) {
+        // 读取文件内容
+        const fileContent = await readFileContent(file)
+        
+        // 生成文件ID
+        const fileId = generateFileId()
+        
+        // 创建文件对象
+        const fileObj = {
+          file_id: fileId,
+          filename: file.name,
+          file_size: file.size,
+          file_type: file.type || 'text/plain',
+          session_id: sessionStore.currentSessionId
+        }
+        
+        // 添加到文件列表
+        fileStore.addFile(fileObj)
+        
+        // 存储文件内容
+        fileStore.setFileContent(fileId, fileContent)
+      }
+      
+      ElMessage.success(`成功上传 ${files.length} 个文件`)
+    } catch (error) {
+      console.error('文件上传失败:', error)
+      ElMessage.error('文件上传失败')
+    } finally {
+      fileStore.isUploading = false
+    }
+  }
+  
+  // 添加用户消息
+  if (content) {
+    messageStore.addUserMessage(sessionStore.currentSessionId, content)
   }
   
   // 滚动到底部
@@ -148,6 +295,99 @@ const scrollToBottom = () => {
   }, 100)
 }
 
+// 拖拽调整宽度的函数
+const startResize = (e) => {
+  isResizing.value = true
+  startX.value = e.clientX
+  
+  // 获取代码编辑器当前宽度
+  const codeElement = document.querySelector('.code-panel')
+  startCodeWidth.value = codePanelWidth.value || codeElement.offsetWidth
+  
+  document.addEventListener('mousemove', handleResize)
+  document.addEventListener('mouseup', stopResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+const handleResize = (e) => {
+  if (!isResizing.value) return
+  
+  const deltaX = e.clientX - startX.value
+  const newCodeWidth = startCodeWidth.value - deltaX
+  
+  // 代码编辑器最小300px，最大不超过窗口宽度的60%
+  const minCodeWidth = 300
+  const maxCodeWidth = window.innerWidth * 0.6
+  
+  if (newCodeWidth >= minCodeWidth && newCodeWidth <= maxCodeWidth) {
+    codePanelWidth.value = newCodeWidth
+  }
+}
+
+const stopResize = () => {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResize)
+  document.removeEventListener('mouseup', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+// 上传背景图片
+// 背景管理命令处理
+const handleBackgroundCommand = (command) => {
+  if (command === 'upload') {
+    // 上传背景图片
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = (e) => {
+      const file = e.target.files[0]
+      if (file) {
+        if (file.size > 5 * 1024 * 1024) {
+          ElMessage.error('图片大小不能超过5MB')
+          return
+        }
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          backgroundImage.value = e.target.result
+          ElMessage.success('背景图片上传成功')
+        }
+        reader.readAsDataURL(file)
+      }
+    }
+    input.click()
+  } else if (command === 'clear') {
+    // 清除背景图片
+    backgroundImage.value = null
+    ElMessage.success('背景图片已清除')
+  }
+}
+
+// 文件树折叠/展开
+const handleFileTreeToggle = (collapsed) => {
+  // 可以在这里保存状态到localStorage
+  console.log('File tree collapsed:', collapsed)
+}
+
+// 监听会话切换，清理文件
+watch(() => sessionStore.currentSessionId, (newSessionId, oldSessionId) => {
+  if (newSessionId !== oldSessionId && oldSessionId !== null) {
+    // 切换会话时清理文件列表
+    fileStore.clearFiles()
+    // 重置布局宽度
+    codePanelWidth.value = null
+  }
+})
+
+// 监听文件变化，当没有文件时重置布局
+watch(() => fileStore.uploadedFiles.length, (newLength) => {
+  if (newLength === 0) {
+    // 没有文件时重置宽度，恢复弹性布局
+    codePanelWidth.value = null
+  }
+})
+
 onMounted(async () => {
   // 初始化：获取会话列表
   try {
@@ -166,15 +406,70 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* 动态渐变背景动画 */
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes floatBubbles {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -30px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+}
+
 .review-workspace {
   display: flex;
-  width: 100vw;
-  height: 100vh;
-  background: #f0f2f5;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(-45deg, 
+    rgba(240, 242, 255, 0.95) 0%, 
+    rgba(255, 240, 250, 0.95) 25%,
+    rgba(240, 248, 255, 0.95) 50%,
+    rgba(255, 245, 250, 0.95) 75%,
+    rgba(245, 240, 255, 0.95) 100%
+  );
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
   overflow: hidden;
   gap: 12px;
   padding: 12px;
   box-sizing: border-box;
+  position: relative;
+}
+
+.review-workspace::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  right: -50%;
+  bottom: -50%;
+  background: 
+    radial-gradient(circle at 20% 80%, rgba(147, 197, 253, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(251, 207, 232, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(196, 181, 253, 0.15) 0%, transparent 50%);
+  animation: floatBubbles 20s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.review-workspace > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* 左侧边栏 */
@@ -196,12 +491,22 @@ onMounted(async () => {
 }
 
 .sidebar-header {
-  padding: 20px;
+  padding: 16px;
   border-bottom: 1px solid #f0f0f0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  gap: 12px;
+}
+
+.sidebar-header .header-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
 }
 
 .sidebar-header h3 {
@@ -209,14 +514,59 @@ onMounted(async () => {
   font-weight: 600;
   color: #303133;
   margin: 0;
+  white-space: nowrap;
 }
 
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid #f0f0f0;
-  display: flex;
+.sidebar-header .toggle-btn {
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed .sidebar-header {
   justify-content: center;
-  background: #fafbfc;
+  padding: 16px 12px;
+}
+
+/* 收缩后的操作按钮 */
+.collapsed-actions {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* 拖拽手柄 */
+.resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  margin: 0 -3px;  /* 缩小与两侧的间隔 */
+}
+
+.resize-handle:hover,
+.resize-handle.resizing {
+  background: rgba(64, 158, 255, 0.1);
+}
+
+.resize-handle-line {
+  width: 2px;
+  height: 40px;
+  background: rgba(64, 158, 255, 0.3);
+  border-radius: 1px;
+  transition: all 0.2s;
+}
+
+.resize-handle:hover .resize-handle-line,
+.resize-handle.resizing .resize-handle-line {
+  height: 60px;
+  background: rgba(64, 158, 255, 0.6);
 }
 
 /* 中间主内容区 */
@@ -224,7 +574,7 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  min-width: 400px;
   background: #ffffff;
   border-radius: 12px;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.08);
@@ -256,15 +606,16 @@ onMounted(async () => {
 }
 
 .chat-input {
-  background: #ffffff;
-  border-top: 1px solid #f0f0f0;
-  box-shadow: 0 -2px 8px 0 rgba(0, 0, 0, 0.04);
+  background: rgba(255, 255, 255, 0.4);
+  border-top: 1px solid rgba(240, 240, 240, 0.3);
+  box-shadow: 0 -2px 12px 0 rgba(147, 197, 253, 0.1);
+  backdrop-filter: blur(10px);
 }
 
 /* 右侧代码面板 */
 .code-panel {
-  width: 550px;
-  min-width: 550px;
+  flex: 1;  /* 默认使用弹性布局填充剩余空间 */
+  min-width: 300px;
   background: #ffffff;
   border-radius: 12px;
   display: flex;
@@ -272,6 +623,7 @@ onMounted(async () => {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.08);
   overflow: hidden;
+  margin-left: -3px;  /* 缩小与对话区域的间隔 */
 }
 
 .code-panel.hidden {
@@ -287,9 +639,32 @@ onMounted(async () => {
   border-bottom: 1px solid #f0f0f0;
   display: flex;
   align-items: center;
-  overflow-x: auto;
+  justify-content: space-between;
   background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
   box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.04);
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.code-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-right: 1px solid #e4e7ed;
+}
+
+.opacity-label {
+  font-size: 12px;
+  color: #606266;
+  white-space: nowrap;
 }
 
 .file-tabs {
@@ -352,10 +727,39 @@ onMounted(async () => {
   transform: scale(1.1);
 }
 
+.code-editor-wrapper {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
 .code-editor {
   flex: 1;
   overflow: hidden;
   background: #1e1e1e;
+  position: relative;
+}
+
+/* 毛玻璃主题效果 */
+.code-editor.glass-theme {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* 使用 CSS 变量控制透明度 */
+.code-editor.glass-theme::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, var(--glass-opacity, 0.7)), 
+    rgba(240, 242, 255, var(--glass-opacity, 0.7))
+  );
+  pointer-events: none;
+  z-index: 0;
 }
 
 .empty-state {
