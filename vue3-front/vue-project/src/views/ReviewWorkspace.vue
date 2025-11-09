@@ -166,6 +166,8 @@ import ThemeSelector from '@/components/common/ThemeSelector.vue'
 import FileTree from '@/components/common/FileTree.vue'
 import { getLanguageFromFilename } from '@/utils/format'
 import { readFileContent, generateFileId } from '@/utils/file'
+import { fileAPI } from '@/api/file'
+import { reviewAPI } from '@/api/review'
 
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
@@ -239,32 +241,35 @@ const handleSendMessage = async (content, files) => {
     fileStore.isUploading = true
     try {
       for (const file of files) {
-        // 读取文件内容
+        // 创建 FormData
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('session_id', sessionStore.currentSessionId)
+        
+        // 调用后端 API 上传文件
+        const uploadedFile = await fileAPI.uploadFile(formData, (progress) => {
+          console.log(`上传进度: ${progress}%`)
+        })
+        
+        // 注意：response 拦截器已经提取了 data 字段，所以直接使用返回值
+        // 添加到前端 fileStore
+        fileStore.addFile({
+          file_id: uploadedFile.file_id,
+          filename: uploadedFile.filename,
+          file_size: uploadedFile.file_size,
+          file_type: uploadedFile.file_type,
+          session_id: uploadedFile.session_id
+        })
+        
+        // 存储文件内容到前端
         const fileContent = await readFileContent(file)
-        
-        // 生成文件ID
-        const fileId = generateFileId()
-        
-        // 创建文件对象
-        const fileObj = {
-          file_id: fileId,
-          filename: file.name,
-          file_size: file.size,
-          file_type: file.type || 'text/plain',
-          session_id: sessionStore.currentSessionId
-        }
-        
-        // 添加到文件列表
-        fileStore.addFile(fileObj)
-        
-        // 存储文件内容
-        fileStore.setFileContent(fileId, fileContent)
+        fileStore.setFileContent(uploadedFile.file_id, fileContent)
       }
       
       ElMessage.success(`成功上传 ${files.length} 个文件`)
     } catch (error) {
       console.error('文件上传失败:', error)
-      ElMessage.error('文件上传失败')
+      ElMessage.error('文件上传失败: ' + (error.message || '未知错误'))
     } finally {
       fileStore.isUploading = false
     }
@@ -272,11 +277,60 @@ const handleSendMessage = async (content, files) => {
   
   // 添加用户消息
   if (content) {
-    messageStore.addUserMessage(sessionStore.currentSessionId, content)
+    await messageStore.addUserMessage(sessionStore.currentSessionId, content)
+  }
+  
+  // 如果有文件且有用户消息，触发代码审查
+  if (content && fileStore.uploadedFiles.length > 0) {
+    await handleCodeReview(content)
   }
   
   // 滚动到底部
   scrollToBottom()
+}
+
+const handleCodeReview = async (userQuestion) => {
+  try {
+    // 显示加载状态
+    messageStore.isStreaming = true
+    
+    const uploadedFiles = fileStore.uploadedFiles
+    
+    // 判断是单文件还是多文件审查
+    if (uploadedFiles.length === 1) {
+      // 单文件审查
+      await reviewAPI.reviewSingleFile({
+        session_id: sessionStore.currentSessionId,
+        file_id: uploadedFiles[0].file_id,
+        user_question: userQuestion
+      })
+      
+      // 后端已经保存了消息，需要重新加载消息列表
+      await messageStore.fetchSessionMessages(sessionStore.currentSessionId)
+      
+      ElMessage.success('代码审查完成')
+    } else if (uploadedFiles.length > 1) {
+      // 多文件审查
+      const fileIds = uploadedFiles.map(f => f.file_id)
+      await reviewAPI.reviewMultipleFiles({
+        session_id: sessionStore.currentSessionId,
+        file_ids: fileIds,
+        user_question: userQuestion
+      })
+      
+      // 后端已经保存了消息，需要重新加载消息列表
+      await messageStore.fetchSessionMessages(sessionStore.currentSessionId)
+      
+      ElMessage.success('多文件代码审查完成')
+    }
+    
+  } catch (error) {
+    console.error('代码审查失败:', error)
+    ElMessage.error('代码审查失败: ' + (error.message || '未知错误'))
+  } finally {
+    messageStore.isStreaming = false
+    scrollToBottom()
+  }
 }
 
 const handleCodeUpdate = (fileId, newContent) => {
@@ -370,15 +424,25 @@ const handleFileTreeToggle = (collapsed) => {
   console.log('File tree collapsed:', collapsed)
 }
 
-// 监听会话切换，清理文件
-watch(() => sessionStore.currentSessionId, (newSessionId, oldSessionId) => {
-  if (newSessionId !== oldSessionId && oldSessionId !== null) {
-    // 切换会话时清理文件列表
-    fileStore.clearFiles()
-    // 重置布局宽度
-    codePanelWidth.value = null
+// 监听会话切换，同步文件存储的当前会话
+watch(() => sessionStore.currentSessionId, async (newSessionId, oldSessionId) => {
+  if (newSessionId !== oldSessionId && newSessionId) {
+    // 同步 fileStore 的当前会话ID
+    fileStore.setCurrentSession(newSessionId)
+    
+    // 从后端加载该会话的消息
+    try {
+      await messageStore.fetchSessionMessages(newSessionId)
+    } catch (error) {
+      console.error('加载会话消息失败:', error)
+    }
+    
+    // 如果新会话没有文件，重置布局宽度
+    if (oldSessionId !== null && fileStore.uploadedFiles.length === 0) {
+      codePanelWidth.value = null
+    }
   }
-})
+}, { immediate: true }) // 立即执行，确保初始化时也能同步
 
 // 监听文件变化，当没有文件时重置布局
 watch(() => fileStore.uploadedFiles.length, (newLength) => {
@@ -387,6 +451,17 @@ watch(() => fileStore.uploadedFiles.length, (newLength) => {
     codePanelWidth.value = null
   }
 })
+
+// 监听消息变化，自动滚动到底部
+watch(() => {
+  if (sessionStore.currentSessionId) {
+    return messageStore.getSessionMessages(sessionStore.currentSessionId).value.length
+  }
+  return 0
+}, () => {
+  // 新消息到达时自动滚动到底部
+  scrollToBottom()
+}, { flush: 'post' }) // 在 DOM 更新后执行
 
 onMounted(async () => {
   // 初始化：获取会话列表

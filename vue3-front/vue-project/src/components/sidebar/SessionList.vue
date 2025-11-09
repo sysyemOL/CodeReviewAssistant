@@ -57,9 +57,11 @@ import { ref, computed } from 'vue'
 import { Search, MoreFilled, Edit, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSessionStore } from '@/stores/session'
+import { useFileStore } from '@/stores/file'
 import { formatTime } from '@/utils/format'
 
 const sessionStore = useSessionStore()
+const fileStore = useFileStore()
 const searchKeyword = ref('')
 
 const filteredSessions = computed(() => {
@@ -107,6 +109,8 @@ const handleAction = async (command, session) => {
     ).then(async () => {
       try {
         await sessionStore.deleteSession(session.session_id)
+        // 同时删除该会话的文件
+        fileStore.clearSessionFiles(session.session_id)
         ElMessage.success('删除成功')
       } catch (error) {
         ElMessage.error('删除失败')

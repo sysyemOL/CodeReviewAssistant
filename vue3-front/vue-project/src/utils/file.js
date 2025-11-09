@@ -17,7 +17,8 @@ export function isAllowedFileType(filename) {
   const allowedExtensions = [
     '.py', '.js', '.jsx', '.ts', '.tsx',
     '.java', '.go', '.rs', '.cpp', '.c',
-    '.cs', '.php', '.rb', '.swift', '.kt', '.vue'
+    '.cs', '.php', '.rb', '.swift', '.kt', 
+    '.vue', '.html', '.css', '.scss', '.less'
   ]
   return allowedExtensions.some(ext => filename.toLowerCase().endsWith(ext))
 }

@@ -14,7 +14,9 @@
         {{ message.role === 'user' ? '你' : 'AI助手' }}
       </div>
       
-      <div class="message-content" v-html="renderedContent"></div>
+      <div class="message-content">
+        <MarkdownRenderer :content="message.content" :dark-mode="false" />
+      </div>
       
       <div class="message-actions">
         <span class="time">{{ formatTime(message.created_at) }}</span>
@@ -32,35 +34,16 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import { User, Cpu, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css'
 import { formatTime } from '@/utils/format'
+import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 
 const props = defineProps({
   message: {
     type: Object,
     required: true
   }
-})
-
-// 配置marked
-marked.setOptions({
-  highlight: function(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(code, { language: lang }).value
-    }
-    return hljs.highlightAuto(code).value
-  },
-  breaks: true,
-  gfm: true
-})
-
-const renderedContent = computed(() => {
-  return marked(props.message.content)
 })
 
 const handleCopy = async () => {
@@ -112,35 +95,11 @@ const handleCopy = async () => {
   padding: 16px;
   border-radius: 8px;
   border: 1px solid #e4e7ed;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #303133;
   word-wrap: break-word;
 }
 
 .message-item.assistant .message-content {
   background: #f5f7fa;
-}
-
-.message-content :deep(pre) {
-  margin: 12px 0;
-  border-radius: 6px;
-  overflow-x: auto;
-}
-
-.message-content :deep(code) {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-}
-
-.message-content :deep(p) {
-  margin: 8px 0;
-}
-
-.message-content :deep(ul),
-.message-content :deep(ol) {
-  padding-left: 24px;
-  margin: 8px 0;
 }
 
 .message-actions {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { messageAPI } from '@/api/message'
 
 export const useMessageStore = defineStore('message', () => {
   // 状态
@@ -20,15 +21,50 @@ export const useMessageStore = defineStore('message', () => {
     messages.value[sessionId].push(message)
   }
   
-  const addUserMessage = (sessionId, content) => {
-    const message = {
+  const addUserMessage = async (sessionId, content) => {
+    // 先添加到本地显示
+    const localMessage = {
       message_id: `msg_${Date.now()}`,
       role: 'user',
       content,
       created_at: new Date().toISOString()
     }
-    addMessage(sessionId, message)
-    return message
+    addMessage(sessionId, localMessage)
+    
+    // 异步保存到后端
+    try {
+      const backendMessage = await messageAPI.createMessage({
+        session_id: sessionId,
+        role: 'user',
+        content
+      })
+      
+      // 更新本地消息ID为后端返回的ID
+      // 注意：response 拦截器已经提取了 data 字段
+      const index = messages.value[sessionId].findIndex(m => m.message_id === localMessage.message_id)
+      if (index !== -1) {
+        messages.value[sessionId][index] = backendMessage
+      }
+      
+      return backendMessage
+    } catch (error) {
+      console.error('保存消息到后端失败:', error)
+      return localMessage
+    }
+  }
+  
+  // 从后端加载会话的所有消息
+  const fetchSessionMessages = async (sessionId) => {
+    try {
+      const data = await messageAPI.getSessionMessages(sessionId)
+      // 注意：response 拦截器已经提取了 data 字段，所以返回值是 { items: [...], total: N }
+      messages.value[sessionId] = data.items || []
+      return messages.value[sessionId]
+    } catch (error) {
+      console.error('加载会话消息失败:', error)
+      messages.value[sessionId] = []
+      return []
+    }
   }
   
   const startStreamingMessage = (sessionId) => {
@@ -68,6 +104,7 @@ export const useMessageStore = defineStore('message', () => {
     getSessionMessages,
     addMessage,
     addUserMessage,
+    fetchSessionMessages,
     startStreamingMessage,
     appendToStreamingMessage,
     endStreamingMessage,

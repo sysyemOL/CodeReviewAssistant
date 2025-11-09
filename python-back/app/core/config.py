@@ -5,6 +5,7 @@ from typing import List, Optional, Any
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 import json
+import os
 
 
 class Settings(BaseSettings):
@@ -24,10 +25,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./app.db"
     
     # OpenAI配置（Day 3集成AI时配置）
-    OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL: str = "gpt-4"
-    OPENAI_TEMPERATURE: float = 0.7
-    OPENAI_MAX_TOKENS: int = 2000
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_TEMPERATURE: float = 0.2
+    OPENAI_MAX_TOKENS: int = 8000
     
     # CORS配置
     BACKEND_CORS_ORIGINS: List[str] = [

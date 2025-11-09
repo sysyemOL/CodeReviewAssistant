@@ -8,6 +8,9 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 
+// 导入 highlight.js 样式
+import 'highlight.js/styles/github-dark.css'
+
 import App from './App.vue'
 import router from './router'
 

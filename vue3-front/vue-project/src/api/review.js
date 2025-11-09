@@ -1,53 +1,21 @@
 import request from './request'
 
 export const reviewAPI = {
-  // 代码审查（非流式）
-  analyzeCode(data) {
+  // 审查单个文件
+  reviewSingleFile(data) {
     return request({
-      url: '/review/analyze',
+      url: '/review/single',
       method: 'post',
       data
     })
   },
   
-  // 对话交互
-  chat(data) {
+  // 审查多个文件
+  reviewMultipleFiles(data) {
     return request({
-      url: '/review/chat',
+      url: '/review/multiple',
       method: 'post',
       data
     })
   }
 }
-
-// SSE流式审查
-export function createReviewStream(data, onMessage, onError, onComplete) {
-  const url = `/api/v1/review/stream`  // 修改为与后端一致的API前缀
-  const eventSource = new EventSource(url)
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      onMessage && onMessage(data)
-    } catch (error) {
-      console.error('解析SSE数据失败:', error)
-    }
-  }
-  
-  eventSource.onerror = (error) => {
-    console.error('SSE连接错误:', error)
-    eventSource.close()
-    onError && onError(error)
-  }
-  
-  // 监听完成事件
-  eventSource.addEventListener('complete', () => {
-    eventSource.close()
-    onComplete && onComplete()
-  })
-  
-  return {
-    close: () => eventSource.close()
-  }
-}
-
