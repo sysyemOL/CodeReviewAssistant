@@ -7,6 +7,9 @@ export const useMessageStore = defineStore('message', () => {
   const messages = ref({}) // { sessionId: [messages] }
   const streamingMessage = ref(null) // 当前正在流式输出的消息
   const isStreaming = ref(false)
+  const sseClient = ref(null) // SSE客户端实例，用于停止流
+  const thinkingProcess = ref('') // AI思考过程
+  const showThinkingProcess = ref(true) // 是否显示思考过程
   
   // 计算属性
   const getSessionMessages = (sessionId) => {
@@ -67,15 +70,25 @@ export const useMessageStore = defineStore('message', () => {
     }
   }
   
-  const startStreamingMessage = (sessionId) => {
+  const startStreamingMessage = (sessionId, messageId = null) => {
     streamingMessage.value = {
-      message_id: `msg_${Date.now()}`,
+      message_id: messageId || `msg_temp_${Date.now()}`,
       role: 'assistant',
       content: '',
+      streaming: true,
       created_at: new Date().toISOString()
     }
     isStreaming.value = true
+    thinkingProcess.value = '' // 重置思考过程
+    showThinkingProcess.value = true // 默认展开思考过程
     addMessage(sessionId, streamingMessage.value)
+    return streamingMessage.value
+  }
+  
+  const updateStreamingMessageId = (messageId) => {
+    if (streamingMessage.value) {
+      streamingMessage.value.message_id = messageId
+    }
   }
   
   const appendToStreamingMessage = (chunk) => {
@@ -85,6 +98,9 @@ export const useMessageStore = defineStore('message', () => {
   }
   
   const endStreamingMessage = () => {
+    if (streamingMessage.value) {
+      streamingMessage.value.streaming = false
+    }
     streamingMessage.value = null
     isStreaming.value = false
   }
@@ -97,19 +113,65 @@ export const useMessageStore = defineStore('message', () => {
     messages.value[sessionId] = messageList
   }
   
+  // 设置SSE客户端
+  const setSSEClient = (client) => {
+    sseClient.value = client
+  }
+  
+  // 停止流式输出并保存部分内容
+  const abortStreaming = async () => {
+    if (sseClient.value) {
+      sseClient.value.abort()
+      sseClient.value = null
+    }
+    
+    // 保存当前部分内容和思考过程到后端
+    if (streamingMessage.value && streamingMessage.value.message_id) {
+      try {
+        await messageAPI.updateMessage(streamingMessage.value.message_id, {
+          content: streamingMessage.value.content || '',
+          thinking_process: thinkingProcess.value || null
+        })
+        console.log('已保存中断时的消息内容')
+      } catch (error) {
+        console.error('保存中断消息失败:', error)
+      }
+    }
+    
+    endStreamingMessage()
+  }
+  
+  // 添加思考过程内容
+  const appendToThinkingProcess = (chunk) => {
+    thinkingProcess.value += chunk
+  }
+  
+  // 切换思考过程显示/隐藏
+  const toggleThinkingProcess = () => {
+    showThinkingProcess.value = !showThinkingProcess.value
+  }
+  
   return {
     messages,
     streamingMessage,
     isStreaming,
+    sseClient,
+    thinkingProcess,
+    showThinkingProcess,
     getSessionMessages,
     addMessage,
     addUserMessage,
     fetchSessionMessages,
     startStreamingMessage,
+    updateStreamingMessageId,
     appendToStreamingMessage,
     endStreamingMessage,
     clearSessionMessages,
-    loadSessionMessages
+    loadSessionMessages,
+    setSSEClient,
+    abortStreaming,
+    appendToThinkingProcess,
+    toggleThinkingProcess
   }
 })
 

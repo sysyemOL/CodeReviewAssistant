@@ -296,7 +296,7 @@ const stopResize = () => {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 0;
 }
 
 .node-icon {
@@ -353,7 +353,7 @@ const stopResize = () => {
 :deep(.el-tree-node__content) {
   height: 32px;
   border-radius: 4px;
-  margin: 0 8px;
+  margin: 0 8px 0 0;  
 }
 
 :deep(.el-tree-node__content:hover) {

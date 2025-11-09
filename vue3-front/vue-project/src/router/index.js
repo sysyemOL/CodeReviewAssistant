@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import PortalPage from '@/views/PortalPage.vue'
 import ReviewWorkspace from '@/views/ReviewWorkspace.vue'
 
 const router = createRouter({
@@ -6,7 +7,15 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'home',
+      name: 'portal',
+      component: PortalPage,
+      meta: {
+        title: "Liu Shuo's 雷客AI应用研发挑战赛作品"
+      }
+    },
+    {
+      path: '/workspace',
+      name: 'workspace',
       component: ReviewWorkspace,
       meta: {
         title: 'AI代码Review助手'

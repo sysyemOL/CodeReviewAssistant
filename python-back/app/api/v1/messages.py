@@ -8,8 +8,16 @@ from app.db.database import get_db
 from app.models.message import Message
 from app.schemas.message import MessageCreate, MessageResponse
 from app.core.response import success_response
+from pydantic import BaseModel
+from typing import Optional
 
 router = APIRouter()
+
+
+class MessageUpdate(BaseModel):
+    """更新消息模型"""
+    content: Optional[str] = None
+    thinking_process: Optional[str] = None
 
 
 @router.post("/", response_model=dict)
@@ -83,6 +91,38 @@ async def get_message(
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{message_id}", response_model=dict)
+async def update_message(
+    message_id: str,
+    update_data: MessageUpdate,
+    db: Session = Depends(get_db)
+):
+    """更新消息内容（用于保存中断时的部分内容）"""
+    try:
+        message = db.query(Message).filter(Message.message_id == message_id).first()
+        if not message:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        
+        # 更新字段
+        if update_data.content is not None:
+            message.content = update_data.content
+        if update_data.thinking_process is not None:
+            message.thinking_process = update_data.thinking_process
+        
+        db.commit()
+        db.refresh(message)
+        
+        return success_response(
+            data=MessageResponse.model_validate(message),
+            message="消息更新成功"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 

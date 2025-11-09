@@ -25,6 +25,7 @@ class Message(Base):
     session_id = Column(String(50), ForeignKey("sessions.session_id"), nullable=False, comment="所属会话ID")
     role = Column(SQLEnum(MessageRole), nullable=False, comment="消息角色")
     content = Column(Text, nullable=False, comment="消息内容")
+    thinking_process = Column(Text, nullable=True, comment="AI思考过程")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
     
     # 关系

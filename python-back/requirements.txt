@@ -3,9 +3,10 @@ fastapi==0.121.0
 uvicorn[standard]==0.38.0
 python-multipart==0.0.20
 
-# AI & LangChain
+# AI & LangChain (1.0 Agent Support)
 langchain==1.0.0
 langchain-openai==0.3.33
+langgraph>=0.2.0
 openai==1.108.0
 
 # Database

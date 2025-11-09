@@ -23,6 +23,7 @@ class MessageResponse(MessageBase):
     message_id: str
     session_id: str
     role: MessageRole
+    thinking_process: str | None = None
     created_at: datetime
     
     class Config:

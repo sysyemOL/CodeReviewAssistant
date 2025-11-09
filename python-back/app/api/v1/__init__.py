@@ -2,7 +2,7 @@
 API v1版本
 """
 from fastapi import APIRouter
-from app.api.v1 import health, sessions, messages, files, review
+from app.api.v1 import health, sessions, messages, files, review, chat
 
 api_router = APIRouter()
 
@@ -12,4 +12,5 @@ api_router.include_router(sessions.router, prefix="/sessions", tags=["会话管�
 api_router.include_router(messages.router, prefix="/messages", tags=["消息管理"])
 api_router.include_router(files.router, prefix="/files", tags=["文件管理"])
 api_router.include_router(review.router, prefix="/review", tags=["代码审查"])
+api_router.include_router(chat.router, prefix="/chat", tags=["对话聊天"])
 

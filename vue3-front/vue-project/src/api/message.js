@@ -26,6 +26,15 @@ export const messageAPI = {
     })
   },
   
+  // 更新消息
+  updateMessage(messageId, data) {
+    return request({
+      url: `/messages/${messageId}`,
+      method: 'patch',
+      data
+    })
+  },
+  
   // 删除消息
   deleteMessage(messageId) {
     return request({

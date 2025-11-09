@@ -38,6 +38,17 @@
           title="新对话"
         />
       </div>
+      
+      <!-- 返回门户按钮 -->
+      <div class="back-to-portal">
+        <el-button 
+          :icon="HomeFilled" 
+          circle
+          class="portal-btn"
+          @click="goBackToPortal"
+          title="返回门户"
+        />
+      </div>
     </aside>
 
     <!-- 中间：对话交互区 -->
@@ -68,7 +79,10 @@
     <!-- 右侧：代码编辑器 -->
     <aside 
       class="code-panel" 
-      :class="{ hidden: !fileStore.currentFile }" 
+      :class="{ 
+        hidden: !fileStore.currentFile,
+        'no-transition': isResizing 
+      }" 
       :style="!fileStore.currentFile ? { display: 'none' } : (codePanelWidth ? { width: codePanelWidth + 'px', flex: 'none' } : {})"
     >
       <div class="code-header">
@@ -152,8 +166,9 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { Plus, Expand, Fold, Close, Upload, Picture, Delete } from '@element-plus/icons-vue'
+import { Plus, Expand, Fold, Close, Upload, Picture, Delete, HomeFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
 import { useMessageStore } from '@/stores/message'
@@ -168,7 +183,10 @@ import { getLanguageFromFilename } from '@/utils/format'
 import { readFileContent, generateFileId } from '@/utils/file'
 import { fileAPI } from '@/api/file'
 import { reviewAPI } from '@/api/review'
+import { sendMessageStream } from '@/api/chat'
+import { sessionAPI } from '@/api/session'
 
+const router = useRouter()
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
 const messageStore = useMessageStore()
@@ -181,6 +199,8 @@ const codePanelWidth = ref(null)  // 初始为null，使用弹性布局
 const isResizing = ref(false)
 const startX = ref(0)
 const startCodeWidth = ref(0)
+let rafId = null  // requestAnimationFrame ID
+let pendingWidth = null  // 待更新的宽度
 
 // 编辑器主题和背景
 const editorTheme = ref('pure-white')
@@ -221,6 +241,11 @@ const getEditorStyle = () => {
   return styles
 }
 
+// 返回门户页面
+const goBackToPortal = () => {
+  router.push('/')
+}
+
 const handleCreateSession = async () => {
   try {
     await sessionStore.createSession('新对话')
@@ -251,7 +276,6 @@ const handleSendMessage = async (content, files) => {
           console.log(`上传进度: ${progress}%`)
         })
         
-        // 注意：response 拦截器已经提取了 data 字段，所以直接使用返回值
         // 添加到前端 fileStore
         fileStore.addFile({
           file_id: uploadedFile.file_id,
@@ -275,20 +299,117 @@ const handleSendMessage = async (content, files) => {
     }
   }
   
-  // 添加用户消息
+  // 发送消息（流式）
   if (content) {
-    await messageStore.addUserMessage(sessionStore.currentSessionId, content)
-  }
-  
-  // 如果有文件且有用户消息，触发代码审查
-  if (content && fileStore.uploadedFiles.length > 0) {
-    await handleCodeReview(content)
+    await handleSendMessageWithStream(content)
   }
   
   // 滚动到底部
   scrollToBottom()
 }
 
+// 使用流式 API 发送消息
+const handleSendMessageWithStream = async (content) => {
+  try {
+    // 获取关联的文件ID
+    const fileIds = fileStore.uploadedFiles.map(f => f.file_id)
+    
+    // 添加用户消息到界面
+    const userMessage = {
+      message_id: `msg_temp_${Date.now()}`,
+      role: 'user',
+      content,
+      created_at: new Date().toISOString()
+    }
+    messageStore.addMessage(sessionStore.currentSessionId, userMessage)
+    scrollToBottom()
+    
+    // 启动流式响应
+    messageStore.startStreamingMessage(sessionStore.currentSessionId)
+    scrollToBottom()
+    
+    // 连接 SSE
+    const sseClient = sendMessageStream(
+      {
+        session_id: sessionStore.currentSessionId,
+        message: content,
+        file_ids: fileIds.length > 0 ? fileIds : null
+      },
+      {
+        onUserMessage: (data) => {
+          // 更新用户消息 ID
+          const messages = messageStore.messages[sessionStore.currentSessionId]
+          if (messages) {
+            const lastUserMsg = messages.find(m => m.message_id === userMessage.message_id)
+            if (lastUserMsg) {
+              lastUserMsg.message_id = data.message_id
+            }
+          }
+        },
+        onStart: (data) => {
+          // AI 开始响应
+          console.log('AI 开始响应:', data)
+          messageStore.updateStreamingMessageId(data.message_id)
+        },
+        onThinking: (data) => {
+          // AI 思考过程
+          if (data.delta) {
+            messageStore.appendToThinkingProcess(data.delta)
+          }
+        },
+        onContent: (data) => {
+          // 接收增量内容
+          messageStore.appendToStreamingMessage(data.delta)
+          scrollToBottom()
+        },
+        onDone: async (data) => {
+          // 完成
+          console.log('AI 响应完成:', data)
+          messageStore.endStreamingMessage()
+          scrollToBottom()
+          
+          // 刷新当前会话以更新标题
+          try {
+            const updatedSession = await sessionAPI.getSession(sessionStore.currentSessionId)
+            // 直接更新 sessions 数组中的会话数据
+            const index = sessionStore.sessions.findIndex(s => s.session_id === sessionStore.currentSessionId)
+            if (index !== -1) {
+              sessionStore.sessions[index] = updatedSession
+            }
+          } catch (error) {
+            console.error('刷新会话失败:', error)
+          }
+        },
+        onAbort: () => {
+          // 用户中断
+          console.log('用户中断流式输出')
+          messageStore.endStreamingMessage()
+          ElMessage.info('已停止生成')
+        },
+        onError: (data) => {
+          // 错误处理
+          console.error('流式响应错误:', data)
+          messageStore.endStreamingMessage()
+          ElMessage.error(data.error || 'AI 响应失败')
+        },
+        onClose: () => {
+          // 连接关闭
+          messageStore.endStreamingMessage()
+        }
+      }
+    )
+    
+    // 保存 SSE 客户端引用到 store，以便可以停止流
+    messageStore.setSSEClient(sseClient)
+    
+  } catch (error) {
+    console.error('发送消息失败:', error)
+    ElMessage.error('发送消息失败: ' + (error.message || '未知错误'))
+    messageStore.endStreamingMessage()
+  }
+}
+
+// 保留旧的代码审查方法（作为备用，非流式）
 const handleCodeReview = async (userQuestion) => {
   try {
     // 显示加载状态
@@ -351,6 +472,7 @@ const scrollToBottom = () => {
 
 // 拖拽调整宽度的函数
 const startResize = (e) => {
+  e.preventDefault()
   isResizing.value = true
   startX.value = e.clientX
   
@@ -358,15 +480,29 @@ const startResize = (e) => {
   const codeElement = document.querySelector('.code-panel')
   startCodeWidth.value = codePanelWidth.value || codeElement.offsetWidth
   
-  document.addEventListener('mousemove', handleResize)
+  // 使用 passive: false 以允许 preventDefault
+  document.addEventListener('mousemove', handleResize, { passive: false })
   document.addEventListener('mouseup', stopResize)
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
+  
+  // 防止文本选择和拖拽
+  document.body.style.webkitUserSelect = 'none'
+  document.body.style.mozUserSelect = 'none'
+  document.body.style.msUserSelect = 'none'
 }
 
 const handleResize = (e) => {
   if (!isResizing.value) return
   
+  e.preventDefault()
+  
+  // 取消之前的 requestAnimationFrame
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+  }
+  
+  // 计算新宽度
   const deltaX = e.clientX - startX.value
   const newCodeWidth = startCodeWidth.value - deltaX
   
@@ -374,17 +510,44 @@ const handleResize = (e) => {
   const minCodeWidth = 300
   const maxCodeWidth = window.innerWidth * 0.6
   
-  if (newCodeWidth >= minCodeWidth && newCodeWidth <= maxCodeWidth) {
-    codePanelWidth.value = newCodeWidth
-  }
+  // 限制宽度范围
+  const clampedWidth = Math.max(minCodeWidth, Math.min(newCodeWidth, maxCodeWidth))
+  
+  // 存储待更新的宽度
+  pendingWidth = clampedWidth
+  
+  // 使用 requestAnimationFrame 更新 UI
+  rafId = requestAnimationFrame(() => {
+    if (pendingWidth !== null) {
+      codePanelWidth.value = pendingWidth
+      pendingWidth = null
+    }
+    rafId = null
+  })
 }
 
 const stopResize = () => {
   isResizing.value = false
+  
+  // 取消待处理的 requestAnimationFrame
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  
+  // 如果有待更新的宽度，立即应用
+  if (pendingWidth !== null) {
+    codePanelWidth.value = pendingWidth
+    pendingWidth = null
+  }
+  
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', stopResize)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
+  document.body.style.webkitUserSelect = ''
+  document.body.style.mozUserSelect = ''
+  document.body.style.msUserSelect = ''
 }
 
 // 上传背景图片
@@ -598,17 +761,51 @@ onMounted(async () => {
 
 .sidebar.collapsed .sidebar-header {
   justify-content: center;
-  padding: 16px 12px;
+  padding: 16px 0;
+}
+
+.sidebar.collapsed .sidebar-header .header-left {
+  display: none;
 }
 
 /* 收缩后的操作按钮 */
 .collapsed-actions {
-  padding: 16px;
+  padding: 16px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+}
+
+/* 返回门户按钮 */
+.back-to-portal {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+}
+
+.portal-btn {
+  background: linear-gradient(135deg, #409EFF 0%, #66b1ff 100%) !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.portal-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.4);
+}
+
+.portal-btn:active {
+  transform: scale(0.95);
+}
+
+/* 收缩状态下的返回按钮位置调整 */
+.sidebar.collapsed .back-to-portal {
+  left: 50%;
 }
 
 /* 拖拽手柄 */
@@ -618,11 +815,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: background 0.2s ease;
   flex-shrink: 0;
   position: relative;
   z-index: 10;
   margin: 0 -3px;  /* 缩小与两侧的间隔 */
+  will-change: background;  /* GPU 加速 */
 }
 
 .resize-handle:hover,
@@ -635,7 +833,8 @@ onMounted(async () => {
   height: 40px;
   background: rgba(64, 158, 255, 0.3);
   border-radius: 1px;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  will-change: transform;  /* GPU 加速 */
 }
 
 .resize-handle:hover .resize-handle-line,
@@ -695,10 +894,17 @@ onMounted(async () => {
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.08);
   overflow: hidden;
   margin-left: -3px;  /* 缩小与对话区域的间隔 */
+  will-change: width;  /* GPU 加速宽度变化 */
+  /* 拖拽时不使用过渡动画，提高性能 */
+}
+
+/* 拖拽时禁用过渡动画以提高性能 */
+.code-panel.no-transition,
+.code-panel.no-transition * {
+  transition: none !important;
 }
 
 .code-panel.hidden {

@@ -16,22 +16,6 @@
         :key="message.message_id"
         :message="message"
       />
-      
-      <!-- 加载状态 -->
-      <div v-if="isStreaming" class="loading-message">
-        <div class="avatar">
-          <el-avatar :size="36" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-            <el-icon><Cpu /></el-icon>
-          </el-avatar>
-        </div>
-        <div class="content">
-          <div class="role-name">AI助手</div>
-          <div class="loading-indicator">
-            <el-icon class="rotating"><Loading /></el-icon>
-            <span>正在思考中...</span>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
