@@ -58,7 +58,15 @@
       </div>
       
       <div class="chat-messages" ref="messagesContainer">
-        <MessageList :session-id="sessionStore.currentSessionId" />
+        <!-- 初始化加载状态 -->
+        <div v-if="isInitializing" class="loading-state">
+          <el-skeleton :rows="5" animated />
+        </div>
+        
+        <!-- 消息列表 -->
+        <transition name="fade" mode="out-in">
+          <MessageList v-if="!isInitializing" :session-id="sessionStore.currentSessionId" />
+        </transition>
       </div>
       
       <div class="chat-input">
@@ -86,19 +94,58 @@
       :style="!fileStore.currentFile ? { display: 'none' } : (codePanelWidth ? { width: codePanelWidth + 'px', flex: 'none' } : {})"
     >
       <div class="code-header">
-        <div class="file-tabs">
-          <div 
-            v-for="file in fileStore.uploadedFiles" 
-            :key="file.file_id"
-            class="file-tab"
-            :class="{ active: file.file_id === fileStore.currentFileId }"
-            @click="fileStore.setCurrentFile(file.file_id)"
+        <div class="file-tabs-container">
+          <el-icon 
+            class="tab-scroll-btn left" 
+            @click="scrollTabs('left')" 
+            v-if="showScrollButtons"
+            tabindex="-1"
+            aria-hidden="true"
           >
-            <span>{{ file.filename }}</span>
-            <el-icon class="close-icon" @click.stop="handleRemoveFile(file.file_id)">
-              <Close />
-            </el-icon>
+            <ArrowLeft />
+          </el-icon>
+          
+          <div class="file-tabs" ref="fileTabsRef" role="tablist">
+            <div 
+              v-for="(file, index) in fileStore.uploadedFiles" 
+              :key="file.file_id"
+              class="file-tab"
+              :class="{ active: file.file_id === fileStore.currentFileId }"
+              @click="fileStore.setCurrentFile(file.file_id)"
+              @keydown.enter="fileStore.setCurrentFile(file.file_id)"
+              @keydown.space.prevent="fileStore.setCurrentFile(file.file_id)"
+              @keydown.delete.prevent="handleRemoveFile(file.file_id)"
+              @keydown.backspace.prevent="handleRemoveFile(file.file_id)"
+              :title="`${file.filename} - 按 Ctrl+${index + 1} 切换 | Delete 关闭`"
+              tabindex="0"
+              role="tab"
+              :aria-selected="file.file_id === fileStore.currentFileId"
+            >
+              <el-icon class="file-icon" :style="{ color: getFileIconColor(file.filename) }">
+                <component :is="getFileIcon(file.filename)" />
+              </el-icon>
+              <span class="file-name">{{ file.filename }}</span>
+              <el-icon 
+                class="close-icon" 
+                @click.stop="handleRemoveFile(file.file_id)"
+                tabindex="-1"
+                role="button"
+                :aria-label="`关闭 ${file.filename}`"
+              >
+                <Close />
+              </el-icon>
+            </div>
           </div>
+          
+          <el-icon 
+            class="tab-scroll-btn right" 
+            @click="scrollTabs('right')" 
+            v-if="showScrollButtons"
+            tabindex="-1"
+            aria-hidden="true"
+          >
+            <ArrowRight />
+          </el-icon>
         </div>
         <div class="code-actions">
           <!-- 透明度滑轨（仅毛玻璃主题显示） -->
@@ -155,8 +202,24 @@
             :theme="editorTheme"
             @update="handleCodeUpdate"
           />
+          <!-- 上传中状态 -->
+          <div v-if="isUploadingFile" class="uploading-state">
+            <el-icon class="is-loading upload-icon">
+              <Upload />
+            </el-icon>
+            <p>正在上传文件...</p>
+          </div>
+          
+          <!-- 空状态 -->
           <div v-else class="empty-state">
-            <el-empty description="暂无文件" />
+            <el-icon class="empty-icon">
+              <Document />
+            </el-icon>
+            <h3>暂无文件</h3>
+            <p>上传代码文件开始审查</p>
+            <el-button type="primary" :icon="Upload" @click="handleFileUpload">
+              上传文件
+            </el-button>
           </div>
         </div>
       </div>
@@ -165,9 +228,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { Plus, Expand, Fold, Close, Upload, Picture, Delete, HomeFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { Plus, Expand, Fold, Close, Upload, Picture, Delete, HomeFilled, ArrowLeft, ArrowRight, Document, DocumentCopy } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
@@ -185,6 +247,7 @@ import { fileAPI } from '@/api/file'
 import { reviewAPI } from '@/api/review'
 import { sendMessageStream } from '@/api/chat'
 import { sessionAPI } from '@/api/session'
+import { showError, showSuccess, showWarning, showErrorNotification, handleError } from '@/utils/errorHandler'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -193,6 +256,13 @@ const messageStore = useMessageStore()
 const fileStore = useFileStore()
 
 const messagesContainer = ref(null)
+const fileTabsRef = ref(null)
+const showScrollButtons = ref(false)
+
+// 加载状态
+const isInitializing = ref(true)
+const isUploadingFile = ref(false)
+const isSendingMessage = ref(false)
 
 // 拖拽调整宽度相关
 const codePanelWidth = ref(null)  // 初始为null，使用弹性布局
@@ -249,9 +319,9 @@ const goBackToPortal = () => {
 const handleCreateSession = async () => {
   try {
     await sessionStore.createSession('新对话')
-    ElMessage.success('创建会话成功')
+    showSuccess('创建会话成功')
   } catch (error) {
-    ElMessage.error('创建会话失败')
+    handleError(error, '创建会话失败')
   }
 }
 
@@ -271,6 +341,9 @@ const handleSendMessage = async (content, files) => {
         formData.append('file', file)
         formData.append('session_id', sessionStore.currentSessionId)
         
+        // 先读取文件内容
+        const fileContent = await readFileContent(file)
+        
         // 调用后端 API 上传文件
         const uploadedFile = await fileAPI.uploadFile(formData, (progress) => {
           console.log(`上传进度: ${progress}%`)
@@ -286,14 +359,13 @@ const handleSendMessage = async (content, files) => {
         })
         
         // 存储文件内容到前端
-        const fileContent = await readFileContent(file)
         fileStore.setFileContent(uploadedFile.file_id, fileContent)
       }
       
-      ElMessage.success(`成功上传 ${files.length} 个文件`)
+      showSuccess(`成功上传 ${files.length} 个文件`)
     } catch (error) {
       console.error('文件上传失败:', error)
-      ElMessage.error('文件上传失败: ' + (error.message || '未知错误'))
+      handleError(error, '文件上传失败')
     } finally {
       fileStore.isUploading = false
     }
@@ -384,13 +456,13 @@ const handleSendMessageWithStream = async (content) => {
           // 用户中断
           console.log('用户中断流式输出')
           messageStore.endStreamingMessage()
-          ElMessage.info('已停止生成')
+          showInfo('已停止生成')
         },
         onError: (data) => {
           // 错误处理
           console.error('流式响应错误:', data)
           messageStore.endStreamingMessage()
-          ElMessage.error(data.error || 'AI 响应失败')
+          showErrorNotification(data.error || 'AI服务响应失败', 'AI响应错误')
         },
         onClose: () => {
           // 连接关闭
@@ -404,7 +476,7 @@ const handleSendMessageWithStream = async (content) => {
     
   } catch (error) {
     console.error('发送消息失败:', error)
-    ElMessage.error('发送消息失败: ' + (error.message || '未知错误'))
+    handleError(error, '发送消息失败')
     messageStore.endStreamingMessage()
   }
 }
@@ -429,7 +501,7 @@ const handleCodeReview = async (userQuestion) => {
       // 后端已经保存了消息，需要重新加载消息列表
       await messageStore.fetchSessionMessages(sessionStore.currentSessionId)
       
-      ElMessage.success('代码审查完成')
+      showSuccess('代码审查完成')
     } else if (uploadedFiles.length > 1) {
       // 多文件审查
       const fileIds = uploadedFiles.map(f => f.file_id)
@@ -442,12 +514,12 @@ const handleCodeReview = async (userQuestion) => {
       // 后端已经保存了消息，需要重新加载消息列表
       await messageStore.fetchSessionMessages(sessionStore.currentSessionId)
       
-      ElMessage.success('多文件代码审查完成')
+      showSuccess('多文件代码审查完成')
     }
     
   } catch (error) {
     console.error('代码审查失败:', error)
-    ElMessage.error('代码审查失败: ' + (error.message || '未知错误'))
+    handleError(error, '代码审查失败')
   } finally {
     messageStore.isStreaming = false
     scrollToBottom()
@@ -459,7 +531,69 @@ const handleCodeUpdate = (fileId, newContent) => {
 }
 
 const handleRemoveFile = (fileId) => {
+  const files = fileStore.uploadedFiles
+  const removedIndex = files.findIndex(f => f.file_id === fileId)
+  
   fileStore.removeFile(fileId)
+  
+  // 如果删除后还有文件，将焦点移到相邻的文件Tab
+  nextTick(() => {
+    const remainingFiles = fileStore.uploadedFiles
+    if (remainingFiles.length > 0) {
+      // 优先聚焦下一个，如果是最后一个则聚焦前一个
+      const nextIndex = removedIndex < remainingFiles.length ? removedIndex : removedIndex - 1
+      const tabs = fileTabsRef.value?.querySelectorAll('.file-tab')
+      if (tabs && tabs[nextIndex]) {
+        tabs[nextIndex].focus()
+      }
+    }
+  })
+}
+
+// 触发文件上传
+const handleFileUpload = () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.multiple = true
+  input.accept = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.rs,.cpp,.c,.cs,.php,.rb,.swift,.kt'
+  input.onchange = async (e) => {
+    const files = Array.from(e.target.files)
+    if (files.length === 0) return
+    
+    isUploadingFile.value = true
+    
+    try {
+      for (const file of files) {
+        const content = await readFileContent(file)
+        const fileId = generateFileId()
+        
+        // 上传文件到后端
+        await fileAPI.uploadFile({
+          session_id: sessionStore.currentSessionId,
+          file_id: fileId,
+          filename: file.name,
+          content: content
+        })
+        
+        // 添加到 store
+        fileStore.addFile({
+          file_id: fileId,
+          filename: file.name
+        })
+        
+        // 保存文件内容
+        fileStore.setFileContent(fileId, content)
+      }
+      
+      showSuccess(`成功上传 ${files.length} 个文件`)
+    } catch (error) {
+      console.error('文件上传失败:', error)
+      handleError(error, '文件上传失败')
+    } finally {
+      isUploadingFile.value = false
+    }
+  }
+  input.click()
 }
 
 const scrollToBottom = () => {
@@ -562,13 +696,13 @@ const handleBackgroundCommand = (command) => {
       const file = e.target.files[0]
       if (file) {
         if (file.size > 5 * 1024 * 1024) {
-          ElMessage.error('图片大小不能超过5MB')
+          showWarning('图片大小不能超过5MB')
           return
         }
         const reader = new FileReader()
         reader.onload = (e) => {
           backgroundImage.value = e.target.result
-          ElMessage.success('背景图片上传成功')
+          showSuccess('背景图片上传成功')
         }
         reader.readAsDataURL(file)
       }
@@ -577,7 +711,7 @@ const handleBackgroundCommand = (command) => {
   } else if (command === 'clear') {
     // 清除背景图片
     backgroundImage.value = null
-    ElMessage.success('背景图片已清除')
+    showSuccess('背景图片已清除')
   }
 }
 
@@ -615,6 +749,137 @@ watch(() => fileStore.uploadedFiles.length, (newLength) => {
   }
 })
 
+// 文件Tab相关功能
+// 获取文件图标
+const getFileIcon = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase()
+  const iconMap = {
+    'py': 'DocumentCopy',
+    'js': 'DocumentCopy',
+    'ts': 'DocumentCopy',
+    'jsx': 'DocumentCopy',
+    'tsx': 'DocumentCopy',
+    'vue': 'DocumentCopy',
+    'java': 'DocumentCopy',
+    'go': 'DocumentCopy',
+    'rs': 'DocumentCopy',
+    'cpp': 'DocumentCopy',
+    'c': 'DocumentCopy',
+    'cs': 'DocumentCopy',
+    'php': 'DocumentCopy',
+    'rb': 'DocumentCopy',
+    'swift': 'DocumentCopy',
+    'kt': 'DocumentCopy'
+  }
+  return iconMap[ext] || 'Document'
+}
+
+// 获取文件图标颜色
+const getFileIconColor = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase()
+  const colorMap = {
+    'py': '#3776ab',    // Python blue
+    'js': '#f7df1e',    // JavaScript yellow
+    'ts': '#3178c6',    // TypeScript blue
+    'jsx': '#61dafb',   // React cyan
+    'tsx': '#61dafb',   // React cyan
+    'vue': '#42b883',   // Vue green
+    'java': '#007396',  // Java blue
+    'go': '#00add8',    // Go cyan
+    'rs': '#ce422b',    // Rust orange
+    'cpp': '#00599c',   // C++ blue
+    'c': '#555555',     // C gray
+    'cs': '#68217a',    // C# purple
+    'php': '#777bb4',   // PHP purple
+    'rb': '#cc342d',    // Ruby red
+    'swift': '#f05138', // Swift orange
+    'kt': '#7f52ff'     // Kotlin purple
+  }
+  return colorMap[ext] || '#909399'
+}
+
+// Tab滚动功能
+const scrollTabs = (direction) => {
+  if (!fileTabsRef.value) return
+  
+  const scrollAmount = 200
+  const currentScroll = fileTabsRef.value.scrollLeft
+  
+  if (direction === 'left') {
+    fileTabsRef.value.scrollTo({
+      left: currentScroll - scrollAmount,
+      behavior: 'smooth'
+    })
+  } else {
+    fileTabsRef.value.scrollTo({
+      left: currentScroll + scrollAmount,
+      behavior: 'smooth'
+    })
+  }
+}
+
+// 检查是否需要显示滚动按钮
+const checkScrollButtons = () => {
+  if (!fileTabsRef.value) return
+  
+  const { scrollWidth, clientWidth } = fileTabsRef.value
+  showScrollButtons.value = scrollWidth > clientWidth
+}
+
+// 快捷键支持
+const handleKeyDown = (e) => {
+  // Ctrl+数字键切换文件
+  if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
+    e.preventDefault()
+    const index = parseInt(e.key) - 1
+    const files = fileStore.uploadedFiles
+    if (files[index]) {
+      fileStore.setCurrentFile(files[index].file_id)
+    }
+  }
+  // Ctrl+W 关闭当前文件
+  else if (e.ctrlKey && e.key === 'w') {
+    e.preventDefault()
+    if (fileStore.currentFileId) {
+      handleRemoveFile(fileStore.currentFileId)
+    }
+  }
+  // 左右箭头键切换文件Tab（仅当焦点在文件Tab上时）
+  else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && 
+           e.target.classList?.contains('file-tab')) {
+    e.preventDefault()
+    const files = fileStore.uploadedFiles
+    const currentIndex = files.findIndex(f => f.file_id === fileStore.currentFileId)
+    
+    if (currentIndex === -1) return
+    
+    let nextIndex
+    if (e.key === 'ArrowLeft') {
+      // 向左切换
+      nextIndex = currentIndex > 0 ? currentIndex - 1 : files.length - 1
+    } else {
+      // 向右切换
+      nextIndex = currentIndex < files.length - 1 ? currentIndex + 1 : 0
+    }
+    
+    fileStore.setCurrentFile(files[nextIndex].file_id)
+    
+    // 让新的Tab获得焦点
+    nextTick(() => {
+      const tabs = fileTabsRef.value?.querySelectorAll('.file-tab')
+      if (tabs && tabs[nextIndex]) {
+        tabs[nextIndex].focus()
+      }
+    })
+  }
+}
+
+// 监听文件列表变化，更新滚动按钮
+watch(() => fileStore.uploadedFiles.length, async () => {
+  await nextTick()
+  checkScrollButtons()
+})
+
 // 监听消息变化，自动滚动到底部
 watch(() => {
   if (sessionStore.currentSessionId) {
@@ -627,6 +892,36 @@ watch(() => {
 }, { flush: 'post' }) // 在 DOM 更新后执行
 
 onMounted(async () => {
+  // 添加快捷键监听
+  document.addEventListener('keydown', handleKeyDown)
+  
+  // 检查滚动按钮
+  await nextTick()
+  checkScrollButtons()
+  
+  // 监听窗口大小变化
+  window.addEventListener('resize', checkScrollButtons)
+  
+  // 创建ResizeObserver监听代码面板宽度变化，用于差异对话框定位
+  const codePanelResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.target.classList.contains('code-panel')) {
+        const codePanelWidth = entry.contentRect.width
+        document.documentElement.style.setProperty('--code-panel-width', `${codePanelWidth}px`)
+      }
+    }
+  })
+  
+  // 等待DOM渲染后再监听代码面板
+  await nextTick()
+  const codePanel = document.querySelector('.code-panel')
+  if (codePanel) {
+    codePanelResizeObserver.observe(codePanel)
+  }
+  
+  // 保存observer到组件实例，以便在onUnmounted中清理
+  window.__codePanelResizeObserver__ = codePanelResizeObserver
+  
   // 初始化：获取会话列表
   try {
     await sessionStore.fetchSessions()
@@ -639,6 +934,27 @@ onMounted(async () => {
     }
   } catch (error) {
     console.error('初始化失败:', error)
+    showErrorNotification(error, '初始化失败', {
+      duration: 0,  // 不自动关闭
+      message: '应用初始化失败，请刷新页面重试。如果问题持续存在，请检查网络连接或联系技术支持。'
+    })
+  } finally {
+    // 初始化完成
+    setTimeout(() => {
+      isInitializing.value = false
+    }, 500) // 延迟显示，确保骨架屏至少显示500ms
+  }
+})
+
+onUnmounted(() => {
+  // 清理快捷键监听
+  document.removeEventListener('keydown', handleKeyDown)
+  // 清理窗口大小监听
+  window.removeEventListener('resize', checkScrollButtons)
+  // 清理ResizeObserver
+  if (window.__codePanelResizeObserver__) {
+    window.__codePanelResizeObserver__.disconnect()
+    window.__codePanelResizeObserver__ = null
   }
 })
 </script>
@@ -673,6 +989,8 @@ onMounted(async () => {
   display: flex;
   width: 100%;
   height: 100%;
+  /* CSS变量：代码面板宽度，用于差异对话框定位 */
+  --code-panel-width: 600px;
   background: linear-gradient(-45deg, 
     rgba(240, 242, 255, 0.95) 0%, 
     rgba(255, 240, 250, 0.95) 25%,
@@ -898,6 +1216,8 @@ onMounted(async () => {
   overflow: hidden;
   margin-left: -3px;  /* 缩小与对话区域的间隔 */
   will-change: width;  /* GPU 加速宽度变化 */
+  position: relative;
+  z-index: 1;  /* 确保在正常层级，但低于对话框(2100) */
   /* 拖拽时不使用过渡动画，提高性能 */
 }
 
@@ -948,25 +1268,77 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+/* 文件Tab容器 */
+.file-tabs-container {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
 .file-tabs {
   display: flex;
   height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  min-width: 0;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.file-tabs::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.tab-scroll-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8edf2 100%);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  color: #606266;
+  border-right: 1px solid #e4e7ed;
+}
+
+.tab-scroll-btn:hover {
+  background: linear-gradient(135deg, #e8edf2 0%, #dce4ec 100%);
+  color: #303133;
+}
+
+.tab-scroll-btn.left {
+  border-right: 1px solid #e4e7ed;
+}
+
+.tab-scroll-btn.right {
+  border-left: 1px solid #e4e7ed;
+  border-right: none;
 }
 
 .file-tab {
   height: 100%;
-  padding: 0 20px;
+  padding: 0 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   cursor: pointer;
-  border-right: 1px solid #f0f0f0;
+  border-right: 1px solid #e4e7ed;
   background: #fafbfc;
   transition: all 0.2s ease;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   color: #606266;
   position: relative;
+  flex-shrink: 0;
+  min-width: 120px;
+  max-width: 200px;
 }
 
 .file-tab::after {
@@ -975,9 +1347,9 @@ onMounted(async () => {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: transparent;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .file-tab:hover {
@@ -992,20 +1364,60 @@ onMounted(async () => {
 }
 
 .file-tab.active::after {
-  background: #409eff;
+  background: linear-gradient(90deg, #409eff 0%, #66b1ff 100%);
+}
+
+/* Tab键焦点样式 */
+.file-tab:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #409eff;
+}
+
+.file-tab:focus-visible {
+  outline: 2px solid #409eff;
+  outline-offset: -2px;
+}
+
+.file-tab .file-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.file-tab .file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-tab .close-icon {
   font-size: 14px;
+  flex-shrink: 0;
   cursor: pointer;
-  opacity: 0.6;
+  opacity: 0;
   transition: all 0.2s ease;
+  border-radius: 4px;
+}
+
+.file-tab:hover .close-icon {
+  opacity: 0.6;
 }
 
 .file-tab .close-icon:hover {
   opacity: 1;
   color: #f56c6c;
-  transform: scale(1.1);
+  transform: scale(1.2);
+}
+
+.file-tab .close-icon:focus {
+  opacity: 1;
+  outline: 2px solid #409eff;
+  outline-offset: 2px;
+}
+
+.file-tab .close-icon:focus-visible {
+  opacity: 1;
+  background: #f0f2f5;
 }
 
 .code-editor-wrapper {
@@ -1043,12 +1455,328 @@ onMounted(async () => {
   z-index: 0;
 }
 
+/* 加载状态样式 */
+.loading-state {
+  padding: 20px;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 上传状态样式 */
+.uploading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #409eff;
+  animation: fadeIn 0.3s ease;
+}
+
+.uploading-state .upload-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.uploading-state p {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* 空状态样式优化 */
 .empty-state {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background: #fafbfc;
+  animation: fadeIn 0.3s ease;
+}
+
+.empty-state .empty-icon {
+  font-size: 64px;
+  color: #dcdfe6;
+  margin-bottom: 16px;
+}
+
+.empty-state h3 {
+  font-size: 18px;
+  font-weight: 500;
+  color: #606266;
+  margin: 0 0 8px 0;
+}
+
+.empty-state p {
+  font-size: 14px;
+  color: #909399;
+  margin: 0 0 20px 0;
+}
+
+/* 淡入淡出过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 渐入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ========================================
+   响应式适配
+   ======================================== */
+
+/* 平板设备 (1024px以下) */
+@media (max-width: 1024px) {
+  .review-workspace {
+    flex-direction: column;
+  }
+  
+  .code-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1000;  /* 确保低于对话框(2100) */
+    width: 100% !important;
+    max-width: 100%;
+    background: white;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+  
+  .code-panel.hidden {
+    transform: translateX(100%);
+  }
+  
+  .resize-handle {
+    display: none;
+  }
+  
+  .main-content {
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .sidebar {
+    max-width: 280px;
+  }
+  
+  .file-tab {
+    min-width: 100px;
+    max-width: 150px;
+    font-size: 12px;
+  }
+}
+
+/* 小屏幕设备 (768px以下) */
+@media (max-width: 768px) {
+  .review-workspace {
+    padding: 0;
+  }
+  
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 999;
+    width: 280px;
+    max-width: 80vw;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+  
+  .sidebar:not(.collapsed) {
+    transform: translateX(0);
+  }
+  
+  .main-content {
+    width: 100%;
+    padding: 0;
+  }
+  
+  .chat-header {
+    padding: 12px 16px;
+  }
+  
+  .chat-header h2 {
+    font-size: 16px;
+  }
+  
+  .chat-messages {
+    padding: 12px;
+  }
+  
+  .chat-input {
+    padding: 12px;
+  }
+  
+  .file-tabs-container {
+    overflow-x: auto;
+  }
+  
+  .file-tab {
+    min-width: 80px;
+    max-width: 120px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+  
+  .code-header {
+    height: 44px;
+  }
+  
+  /* 添加移动端遮罩 */
+  .sidebar:not(.collapsed)::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: -1;
+  }
+}
+
+/* 超小屏幕设备 (480px以下) */
+@media (max-width: 480px) {
+  .sidebar {
+    width: 100%;
+    max-width: 100%;
+  }
+  
+  .sidebar-header {
+    padding: 12px;
+  }
+  
+  .sidebar-header h3 {
+    font-size: 16px;
+  }
+  
+  .chat-header h2 {
+    font-size: 14px;
+  }
+  
+  .file-tab {
+    min-width: 60px;
+    max-width: 100px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+  
+  .file-tab .file-icon {
+    font-size: 14px;
+  }
+  
+  .tab-scroll-btn {
+    width: 28px;
+    font-size: 14px;
+  }
+  
+  /* 按钮组在小屏幕上调整大小 */
+  .el-button {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  
+  .el-button--circle {
+    padding: 6px;
+  }
+  
+  /* 空状态在小屏幕上调整 */
+  .empty-state .empty-icon {
+    font-size: 48px;
+  }
+  
+  .empty-state h3 {
+    font-size: 16px;
+  }
+  
+  .empty-state p {
+    font-size: 12px;
+  }
+}
+
+/* 横屏平板 (768px - 1024px, 横向) */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
+  .review-workspace {
+    flex-direction: row;
+  }
+  
+  .sidebar {
+    position: relative;
+    transform: none;
+    width: 260px;
+  }
+  
+  .code-panel {
+    position: relative;
+    width: 40% !important;
+  }
+  
+  .main-content {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* 高分辨率屏幕优化 */
+@media (min-width: 1920px) {
+  .review-workspace {
+    max-width: 2560px;
+    margin: 0 auto;
+  }
+  
+  .sidebar {
+    width: 320px;
+  }
+  
+  .chat-messages {
+    padding: 24px;
+  }
+  
+  .file-tab {
+    min-width: 140px;
+    max-width: 240px;
+  }
+}
+
+/* 打印样式 */
+@media print {
+  .sidebar,
+  .chat-input,
+  .code-header,
+  .resize-handle {
+    display: none !important;
+  }
+  
+  .main-content,
+  .code-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  .chat-messages {
+    height: auto !important;
+    overflow: visible !important;
+  }
 }
 </style>
 

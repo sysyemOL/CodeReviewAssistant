@@ -3,7 +3,9 @@ import { ElMessage } from 'element-plus'
 
 // 创建axios实例
 const request = axios.create({
-  baseURL: '/api/v1',  // 修改为与后端一致的API前缀
+  // 使用 /code 前缀，为代码审查助手的专属API命名空间
+  // 这样设计便于未来扩展其他AI应用（如文档助手、数据分析等）
+  baseURL: '/api/v1/code',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'

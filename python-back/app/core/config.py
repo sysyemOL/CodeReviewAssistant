@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     
     # OpenAI配置（Day 3集成AI时配置）
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    OPENAI_BASE_URL: Optional[str] = os.getenv("OPENAI_BASE_URL")
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_TEMPERATURE: float = 0.2
     OPENAI_MAX_TOKENS: int = 8000
@@ -49,7 +50,7 @@ class Settings(BaseSettings):
     # 文件上传配置
     MAX_UPLOAD_SIZE: int = 10485760  # 10MB
     UPLOAD_DIR: str = "./uploads"
-    ALLOWED_EXTENSIONS: List[str] = [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".cpp", ".c", ".h", ".hpp"]
+    ALLOWED_EXTENSIONS: List[str] = [".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".java", ".go", ".cpp", ".c", ".h", ".hpp", ".cs", ".php", ".rb", ".swift", ".kt"]
     
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
     @classmethod

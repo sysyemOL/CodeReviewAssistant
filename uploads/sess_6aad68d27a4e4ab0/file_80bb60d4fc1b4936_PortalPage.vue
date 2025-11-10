@@ -7,7 +7,7 @@
     <header class="portal-header">
       <h1 class="portal-title">
         <span class="name-highlight">Liu Shuo</span>'s 
-        <span class="event-name">雷石AI应用研发挑战赛作品</span>
+        <span class="event-name">雷客AI应用研发挑战赛作品</span>
       </h1>
     </header>
 

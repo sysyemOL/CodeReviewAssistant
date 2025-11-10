@@ -60,7 +60,10 @@ async def root():
         "message": "Welcome to AI Code Review Assistant API",
         "version": settings.VERSION,
         "docs": "/docs",
-        "health": "/api/v1/health"
+        "health": "/api/v1/code/health",
+        "applications": {
+            "code_review": "/api/v1/code/*"
+        }
     }
 
 

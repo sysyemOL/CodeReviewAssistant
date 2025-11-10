@@ -170,13 +170,23 @@ const formatSize = (bytes) => {
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
 }
 
-// 拖拽调整宽度
+// 拖拽调整宽度 - 优化版本
+let rafId = null // 用于 requestAnimationFrame 的ID
+let pendingWidth = null // 待更新的宽度
+
 const startResize = (e) => {
+  e.preventDefault() // 防止文本选择等默认行为
   isResizing.value = true
   startX.value = e.clientX
   startWidth.value = treeWidth.value
   
-  document.addEventListener('mousemove', handleResize)
+  // 添加 no-transition 类以禁用过渡动画
+  const container = document.querySelector('.file-tree-container')
+  if (container) {
+    container.classList.add('no-transition')
+  }
+  
+  document.addEventListener('mousemove', handleResize, { passive: false })
   document.addEventListener('mouseup', stopResize)
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
@@ -185,17 +195,43 @@ const startResize = (e) => {
 const handleResize = (e) => {
   if (!isResizing.value) return
   
+  e.preventDefault() // 防止默认行为
+  
   const deltaX = e.clientX - startX.value
   const newWidth = startWidth.value + deltaX
   
   // 最小48px（与折叠宽度一致），最大500px
   if (newWidth >= 48 && newWidth <= 500) {
-    treeWidth.value = newWidth
+    pendingWidth = newWidth
+    
+    // 使用 requestAnimationFrame 进行节流，确保流畅性
+    if (rafId === null) {
+      rafId = requestAnimationFrame(() => {
+        if (pendingWidth !== null) {
+          treeWidth.value = pendingWidth
+          pendingWidth = null
+        }
+        rafId = null
+      })
+    }
   }
 }
 
 const stopResize = () => {
   isResizing.value = false
+  
+  // 取消待处理的 RAF
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  
+  // 移除 no-transition 类以恢复过渡动画
+  const container = document.querySelector('.file-tree-container')
+  if (container) {
+    container.classList.remove('no-transition')
+  }
+  
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', stopResize)
   document.body.style.cursor = ''
@@ -210,6 +246,12 @@ const stopResize = () => {
   position: relative;
   flex-shrink: 0;
   transition: width 0.1s ease-out;
+  will-change: width; /* GPU加速 */
+}
+
+/* 拖拽时禁用过渡 */
+.file-tree-container.no-transition {
+  transition: none !important;
 }
 
 .file-tree {
@@ -237,6 +279,7 @@ const stopResize = () => {
   bottom: 0;
   z-index: 10;
   transition: background 0.2s;
+  will-change: background; /* GPU加速 */
 }
 
 .tree-resize-handle:hover,
@@ -247,6 +290,7 @@ const stopResize = () => {
 .resize-line {
   width: 2px;
   height: 40px;
+  will-change: transform; /* GPU加速 */
   background: rgba(64, 158, 255, 0.3);
   border-radius: 1px;
   transition: all 0.2s;

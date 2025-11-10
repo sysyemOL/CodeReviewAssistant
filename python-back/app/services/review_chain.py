@@ -192,7 +192,8 @@ class CodeReviewChain:
             model=settings.OPENAI_MODEL,
             temperature=settings.OPENAI_TEMPERATURE,
             max_tokens=settings.OPENAI_MAX_TOKENS,
-            api_key=settings.OPENAI_API_KEY
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_BASE_URL
         )
         
         # 定义可用工具
@@ -249,7 +250,84 @@ class CodeReviewChain:
 - [列出发现的问题]
 
 ### 💡 改进建议
-[具体的改进建议和代码示例]
+
+#### 📝 文字说明
+[概述性的改进建议说明]
+
+#### 🔧 结构化修改指令
+
+**关键要求**：必须严格按照以下格式输出，每个修改指令都要完整包含所有必需字段。
+
+格式规范：
+**修改1：[修改描述]**
+- 操作类型：INSERT
+- 位置：5
+- 内容：
+```python
+[代码内容]
+```
+
+**修改2：[修改描述]**
+- 操作类型：REPLACE
+- 位置：10-12
+- 内容：
+```python
+[代码内容]
+```
+
+**修改3：[修改描述]**
+- 操作类型：DELETE
+- 位置：15-16
+- 内容：
+```python
+[要删除的代码（可选）]
+```
+
+完整示例：
+
+**修改1：添加模块文档字符串**
+- 操作类型：INSERT
+- 位置：1
+- 内容：
+```python
+'''
+此模块提供数字计算相关功能
+'''
+```
+
+**修改2：添加函数文档字符串**
+- 操作类型：INSERT
+- 位置：5
+- 内容：
+```python
+    '''
+    计算列表中所有数字的总和
+    
+    Args:
+        numbers: 数字列表
+        
+    Returns:
+        int: 所有数字的总和
+    '''
+```
+
+**修改3：改进错误处理**
+- 操作类型：REPLACE
+- 位置：10-11
+- 内容：
+```python
+    if not numbers:
+        raise ValueError("输入列表不能为空")
+    return sum(numbers)
+```
+
+关键规则（必须遵守）：
+1. 操作类型必须是：INSERT、REPLACE、DELETE（全大写英文）
+2. 位置必须是纯数字：单行用"5"，范围用"10-12"
+3. 每个修改指令必须完整，不要省略任何字段
+4. 代码块必须用三个反引号包裹，并指定语言
+5. 位置指的是原始代码的行号
+6. 尽量拆分成小步骤，一次修改不超过10行
 
 ### 🎯 优先级排序
 1. [高优先级]
@@ -360,7 +438,7 @@ class CodeReviewChain:
                     code=file_info['code'],
                     filename=file_info['filename'],
                     language=file_info.get('language', 'python'),
-                    user_question=user_question if i == 1 else None  # 只在第一个文件显示用户问题
+                    user_question=user_question 
                 )
                 results.append(review_result)
             except ConnectionError as e:

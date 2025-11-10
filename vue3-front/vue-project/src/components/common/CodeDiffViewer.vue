@@ -2,6 +2,14 @@
   <div class="code-diff-viewer">
     <div class="diff-header">
       <div class="header-left">
+        <el-button 
+          :icon="Close" 
+          circle 
+          size="small" 
+          title="返回代码编辑器" 
+          @click="handleClose"
+          class="close-btn"
+        />
         <el-icon><Document /></el-icon>
         <span class="file-name">{{ fileName }}</span>
       </div>
@@ -27,7 +35,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { Document, Grid, List, DocumentCopy, Download } from '@element-plus/icons-vue'
+import { Document, Grid, List, DocumentCopy, Download, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as Diff2Html from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
@@ -51,7 +59,14 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['close'])
+
 const viewMode = ref('side-by-side')
+
+// 关闭差异视图
+const handleClose = () => {
+  emit('close')
+}
 
 // 生成unified diff格式
 const generateUnifiedDiff = () => {
@@ -154,6 +169,17 @@ const handleDownloadDiff = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.close-btn {
+  margin-right: 4px;
+  transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+  background-color: #f56c6c;
+  color: white;
+  border-color: #f56c6c;
 }
 
 .file-name {
