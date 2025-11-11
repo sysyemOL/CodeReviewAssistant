@@ -187,13 +187,23 @@ class CodeReviewChain:
     
     def __init__(self):
         """初始化代码审查 Agent"""
-        # 初始化 LLM
+        # 初始化 LLM（增加超时配置，防止长时间流式输出中断）
+        import httpx
         self.llm = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             temperature=settings.OPENAI_TEMPERATURE,
             max_tokens=settings.OPENAI_MAX_TOKENS,
             api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL
+            base_url=settings.OPENAI_BASE_URL,
+            # 设置超时：连接5秒，读取300秒（5分钟），写入60秒
+            timeout=httpx.Timeout(
+                connect=5.0,    # 连接超时
+                read=300.0,     # 读取超时（流式输出需要更长时间）
+                write=60.0,     # 写入超时
+                pool=5.0        # 连接池超时
+            ),
+            # 增加最大重试次数
+            max_retries=2
         )
         
         # 定义可用工具

@@ -566,7 +566,7 @@ vue3-front/vue-project/
 - [x] 返回格式优化（Markdown + 结构化指令）
 - [x] 错误处理完善（Prompt修复）
 - [x] API稳定性优化
-- [ ] API路径规范化（添加/code前缀） - Day 5.5进行中
+- [x] API路径规范化（添加/code前缀）
 
 **前端任务：**
 - [x] 代码Diff对比功能（Monaco Editor Diff集成）

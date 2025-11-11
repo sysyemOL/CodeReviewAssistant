@@ -13,7 +13,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
  * @returns {SSEClient} - SSE 客户端实例
  */
 export function sendMessageStream(data, callbacks) {
-  const url = `${BASE_URL}/api/v1/chat/stream`
+  const url = `${BASE_URL}/api/v1/code/chat/stream`
   return createSSEConnection(url, data, callbacks)
 }
 
